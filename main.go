@@ -140,8 +140,8 @@ func (f handlerType) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	//Default headers
 	resp.Header().Set("Server", "xrc")
 	resp.Header().Set("Content-Type", "text/plain")
-	//If we need to serve a html file
-	if strings.Index(req.URL.Path, "/html/") == 0 {
+	//If we need to serve a static file
+	if strings.Index(req.URL.Path, "/static/") == 0 {
 		/*loadPath, err := os.Getwd()
 		if err != nil {
 			resp.WriteHeader(500)
@@ -149,7 +149,7 @@ func (f handlerType) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			resp.Write([]byte("Internal Server Error"))
 		} else {*/
 		loadPath := filepath.Join(startPath, "..", req.URL.Path)
-		//Make sure we are in the html directory
+		//Make sure we are in the static directory
 		if strings.Index(loadPath, startPath) != 0 {
 			resp.WriteHeader(403)
 			resp.Write([]byte("Forbidden"))
@@ -171,7 +171,7 @@ func (f handlerType) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			//Send default page
 			resp.Header().Set("Content-Type", "text/html")
 			resp.WriteHeader(200)
-			resp.Write([]byte(`<html><head><title>xrc</title></head><body><h1 style="padding: 3px; margin: 0px;">xrc</h1><a href="/html/viewer.html">Viewer</a><br><a href="/html/controler.html">Controler</a><hr><i>Jacob O'Toole. MIT Licence.</i></body></html>`))
+			resp.Write([]byte(`<html><head><title>xrc</title></head><body><h1 style="padding: 3px; margin: 0px;">xrc</h1><a href="/static/viewer.html">Viewer</a><br><a href="/static/controler.html">Controler</a><hr><i>Jacob O'Toole. MIT Licence.</i></body></html>`))
 		}
 	}
 }
@@ -340,7 +340,6 @@ var interactCommands = map[byte]func(){
 		i++
 		str := string(commands[i:(i + len)])
 		i += len
-		fmt.Println(str, "down")
 		C.keysDown(C.CString(str))
 	},
 	//Key Up  length:1 char:<length>
@@ -349,7 +348,6 @@ var interactCommands = map[byte]func(){
 		i++
 		str := string(commands[i:(i + len)])
 		i += len
-		fmt.Println(str, "up")
 		C.keysUp(C.CString(str))
 	},
 }
@@ -480,7 +478,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	startPath = filepath.Join(filepath.Dir(startPath), "html")
+	startPath = filepath.Join(filepath.Dir(startPath), "static")
 	//Start Xvfb
 	fmt.Println("Starting Xvfb...")
 	startXvfb(display, width, height, depth)
