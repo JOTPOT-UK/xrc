@@ -117,6 +117,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 )
@@ -142,12 +143,6 @@ func (f handlerType) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "text/plain")
 	//If we need to serve a static file
 	if strings.Index(req.URL.Path, "/static/") == 0 {
-		/*loadPath, err := os.Getwd()
-		if err != nil {
-			resp.WriteHeader(500)
-			fmt.Fprintln(os.Stderr, err)
-			resp.Write([]byte("Internal Server Error"))
-		} else {*/
 		loadPath := filepath.Join(startPath, "..", req.URL.Path)
 		//Make sure we are in the static directory
 		if strings.Index(loadPath, startPath) != 0 {
@@ -160,7 +155,6 @@ func (f handlerType) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			//Serve the file
 			http.ServeFile(resp, req, loadPath)
 		}
-		//}
 	} else {
 		//Get the page handler
 		toCall, ok := pages[req.URL.Path]
@@ -403,16 +397,41 @@ var pages = map[string]func(http.ResponseWriter, *http.Request){
 	"/getframeanddo": getFrameAndDo,
 }
 
-var xvfb *exec.Cmd
+var xvfb xvfbProcess
+
+type xvfbProcess struct {
+	display string
+	width   int
+	height  int
+	depth   int
+	process *exec.Cmd
+	running bool
+}
 
 //Starts Xvfb and waits to make sure it is loaded properly
-func startXvfb(d string, width, height, depth int) {
-	xvfb = exec.Command("Xvfb", "-screen", "0", strconv.Itoa(width)+"x"+strconv.Itoa(height)+"x"+strconv.Itoa(depth), d)
-	xvfb.Stdin = os.Stdin
-	xvfb.Stdout = os.Stdout
-	xvfb.Stderr = os.Stderr
-	xvfb.Start()
+func (p *xvfbProcess) start() bool {
+	if p.running {
+		return false
+	}
+	p.process = exec.Command("Xvfb", "-screen", "0", strconv.Itoa(p.width)+"x"+strconv.Itoa(p.height)+"x"+strconv.Itoa(p.depth), p.display)
+	p.process.Stdin = os.Stdin
+	p.process.Stdout = os.Stdout
+	p.process.Stderr = os.Stderr
+	p.process.Start()
+	p.running = true
 	time.Sleep(5 * time.Second)
+	return true
+}
+
+func (p *xvfbProcess) stop() {
+	p.process.Process.Kill()
+	p.running = false
+}
+
+func startXvfb(display string, width, height, depth int) xvfbProcess {
+	this := xvfbProcess{display, width, height, depth, nil, false}
+	this.start()
+	return this
 }
 
 //Returns a slice of window IDs from all the windows on the X server
@@ -481,12 +500,37 @@ func main() {
 	startPath = filepath.Join(filepath.Dir(startPath), "static")
 	//Start Xvfb
 	fmt.Println("Starting Xvfb...")
-	startXvfb(display, width, height, depth)
+	xvfb = startXvfb(display, width, height, depth)
 	fmt.Println("Display server open on", display)
 	//Init libxdo
 	C.init(C.CString(display))
 	fmt.Println("Hopefully xdo is connected to display", display)
 	//Start the http server
 	fmt.Println("Starting HTTP server on", httpPort)
-	http.ListenAndServe(httpPort, handlerType{})
+	go http.ListenAndServe(httpPort, handlerType{})
+	//Run bash with command line arguments
+	fmt.Println("Running", "bash", strings.Join(os.Args[1:], " ")+"...")
+	bash := exec.Command("bash", os.Args[1:]...)
+	//Add DISPLAY environment variable
+	bash.Env = append(os.Environ(), "DISPLAY="+display)
+	//Pipe stderr, in and out and run
+	bash.Stdin = os.Stdin
+	bash.Stdout = os.Stdout
+	bash.Stderr = os.Stderr
+	err = bash.Run()
+	//Kill xvfb and exit when we're done
+	xvfb.stop()
+	if err == nil {
+		os.Exit(0)
+	} else {
+		//Exit with the exit code of bash
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				os.Exit(status.ExitStatus())
+			} else {
+				fmt.Fprintln(os.Stderr, "bash exit status unknown, exit status 128")
+				os.Exit(128)
+			}
+		}
+	}
 }
